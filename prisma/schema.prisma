@@ -1,0 +1,352 @@
+// Phase 1 scope: foundation (users/workspaces/roles) + Kanban.
+// Phase 2 adds Calendar and the AI Scheduling Agent.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum WorkspaceRole {
+  OWNER
+  MEMBER
+}
+
+enum MemberStatus {
+  INVITED
+  ACTIVE
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum EventCategory {
+  MEETINGS
+  PRODUCT
+  CLIENT
+  SPRINT
+  MARKETING
+  PERSONAL
+}
+
+enum ChatRole {
+  USER
+  ASSISTANT
+}
+
+model User {
+  id        String   @id // Clerk user ID
+  email     String   @unique
+  name      String?
+  image     String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  workspaceMemberships WorkspaceMember[]
+  createdBoards        Board[]           @relation("BoardCreatedBy")
+  assignedTasks        Task[]            @relation("TaskAssignee")
+  assignedCalendarEvents CalendarEvent[] @relation("CalendarEventAssignee")
+  createdTasks         Task[]            @relation("TaskCreatedBy")
+  comments             Comment[]
+  settings             Settings?
+  calendarEvents       CalendarEvent[]
+  conversations        Conversation[]
+  createdNotes         Note[]            @relation("NoteCreatedBy")
+  createdPages         Page[]            @relation("PageCreatedBy")
+  createdWhiteboards   Whiteboard[]      @relation("WhiteboardCreatedBy")
+
+  @@map("users")
+}
+
+model Workspace {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  members        WorkspaceMember[]
+  boards         Board[]
+  calendarEvents CalendarEvent[]
+  conversations  Conversation[]
+  notes          Note[]
+  pages          Page[]
+  whiteboards    Whiteboard[]
+  spaces         Space[]
+  categories     Category[]
+
+  @@map("workspaces")
+}
+
+// Invite-by-email creates this row with status=INVITED and userId=null.
+// On the invitee's first login with a matching email, status flips to
+// ACTIVE and userId is filled in — no external email send required.
+model WorkspaceMember {
+  id          String        @id @default(cuid())
+  workspaceId String        @map("workspace_id")
+  userId      String?       @map("user_id")
+  email       String
+  role        WorkspaceRole @default(MEMBER)
+  status      MemberStatus  @default(ACTIVE)
+  invitedAt   DateTime      @default(now()) @map("invited_at")
+  joinedAt    DateTime?     @map("joined_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, email])
+  @@index([userId])
+  @@map("workspace_members")
+}
+
+model Board {
+  id          String   @id @default(cuid())
+  workspaceId String   @map("workspace_id")
+  name        String
+  color       String   @default("#6366f1")
+  createdById String   @map("created_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User      @relation("BoardCreatedBy", fields: [createdById], references: [id])
+  columns   Column[]
+
+  @@index([workspaceId])
+  @@map("boards")
+}
+
+model Column {
+  id        String   @id @default(cuid())
+  boardId   String   @map("board_id")
+  name      String
+  color     String   @default("#94a3b8")
+  position  Int
+  createdAt DateTime @default(now()) @map("created_at")
+
+  board Board  @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  tasks Task[]
+
+  @@index([boardId])
+  @@map("columns")
+}
+
+model Task {
+  id          String       @id @default(cuid())
+  columnId    String       @map("column_id")
+  title       String
+  description String?
+  priority    TaskPriority @default(MEDIUM)
+  dueDate     DateTime?    @map("due_date")
+  labels      String[]
+  // Float, not Int: moveTask() assigns a fractional value between its new
+  // neighbors so a drag only ever updates the one moved row — no
+  // renumbering pass across the rest of the column. See moveTask() for why
+  // that matters (it's a network round-trip count fix, not a style choice).
+  position    Float
+  assigneeId  String?      @map("assignee_id")
+  createdById String       @map("created_by")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  column    Column    @relation(fields: [columnId], references: [id], onDelete: Cascade)
+  assignee  User?     @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  createdBy User      @relation("TaskCreatedBy", fields: [createdById], references: [id])
+  comments  Comment[]
+
+  @@index([columnId])
+  @@map("tasks")
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  taskId    String   @map("task_id")
+  authorId  String   @map("author_id")
+  content   String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  task   Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  author User @relation(fields: [authorId], references: [id])
+
+  @@index([taskId])
+  @@map("comments")
+}
+
+// Phase 2 adds `timezone` (Calendar needs it to render UTC-stored event times
+// correctly). Language/date-format/etc. remain deferred — see design doc.
+model Settings {
+  userId           String  @id @map("user_id")
+  theme            String  @default("system")
+  sidebarCollapsed Boolean @default(false) @map("sidebar_collapsed")
+  timezone         String  @default("UTC")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("settings")
+}
+
+// Draft tasks (isDraft=true, date/startTime/endTime null) live in the Draft
+// Panel until dragged onto the calendar grid, which sets isDraft=false and
+// fills in the scheduling fields — see design doc's Calendar draft workflow.
+// Calendar is per-user in v1 (no shared/team calendar yet), but still scoped
+// to workspaceId for tenant isolation.
+model CalendarEvent {
+  id          String         @id @default(cuid())
+  workspaceId String         @map("workspace_id")
+  userId      String         @map("user_id")
+  title       String
+  description String?
+  date        DateTime?      @map("date")
+  startTime   DateTime?      @map("start_time")
+  endTime     DateTime?      @map("end_time")
+  duration    Int?
+  priority    TaskPriority   @default(MEDIUM)
+  category    EventCategory  @default(PERSONAL)
+  isDraft     Boolean        @default(true) @map("is_draft")
+  assigneeId  String?        @map("assignee_id")
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignee  User?     @relation("CalendarEventAssignee", fields: [assigneeId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, userId, date])
+  @@index([assigneeId])
+  @@map("calendar_events")
+}
+
+// One conversation per user per workspace in v1 — no thread list/switcher,
+// matching Calendar's "personal, not shared" scope decision. A message with
+// a non-null pendingAction is an unconfirmed tool call the AI Action
+// Framework is waiting on; confirming/cancelling clears it back to null and
+// rewrites the message content to reflect the outcome, rather than
+// appending a separate message — keeps the transcript readable.
+model Conversation {
+  id          String   @id @default(cuid())
+  workspaceId String   @map("workspace_id")
+  userId      String   @map("user_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  workspace Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages  ChatMessage[]
+
+  @@unique([workspaceId, userId])
+  @@map("conversations")
+}
+
+model ChatMessage {
+  id             String   @id @default(cuid())
+  conversationId String   @map("conversation_id")
+  role           ChatRole
+  content        String
+  pendingAction  Json?    @map("pending_action")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@map("chat_messages")
+}
+
+// Shared within the workspace, same trust model as Boards/Tasks — any
+// active member can view/edit/delete any note. No per-note ownership lock,
+// consistent with the rest of the app (v1 has no granular per-resource ACL).
+model Note {
+  id          String   @id @default(cuid())
+  workspaceId String   @map("workspace_id")
+  title       String
+  content     String   @default("")
+  createdById String   @map("created_by")
+  isPinned    Boolean  @default(false) @map("is_pinned")
+  isTrashed   Boolean  @default(false) @map("is_trashed")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User      @relation("NoteCreatedBy", fields: [createdById], references: [id])
+
+  @@index([workspaceId])
+  @@map("notes")
+}
+
+// Same workspace-shared trust model as Note, but content is a Tiptap
+// document (ProseMirror JSON), not plain text — Pages is the rich-text
+// counterpart to Notes' plain textarea. Stored as JSON rather than HTML so
+// the editor round-trips without a lossy HTML parse on load.
+model Page {
+  id          String   @id @default(cuid())
+  workspaceId String   @map("workspace_id")
+  spaceId     String?  @map("space_id")
+  title       String
+  content     Json     @default("{\"type\":\"doc\",\"content\":[]}")
+  createdById String   @map("created_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  space     Space?    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  createdBy User      @relation("PageCreatedBy", fields: [createdById], references: [id])
+
+  @@index([workspaceId])
+  @@index([spaceId])
+  @@map("pages")
+}
+
+// Same workspace-shared trust model as Note/Page. `elements` is the
+// Excalidraw scene's element array (JSON-serializable by design) — viewport
+// position/zoom (appState) is intentionally not persisted, so a board always
+// opens fitted to its default view rather than wherever it was last panned.
+model Whiteboard {
+  id          String   @id @default(cuid())
+  workspaceId String   @map("workspace_id")
+  title       String
+  elements    Json     @default("[]")
+  createdById String   @map("created_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy User      @relation("WhiteboardCreatedBy", fields: [createdById], references: [id])
+
+  @@index([workspaceId])
+  @@map("whiteboards")
+}
+
+model Space {
+  id          String   @id @default(cuid())
+  workspaceId String   @map("workspace_id")
+  name        String
+  description String?
+  color       String   @default("#6366f1")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  pages     Page[]
+
+  @@index([workspaceId])
+  @@map("spaces")
+}
+
+model Category {
+  id          String   @id @default(cuid())
+  workspaceId String   @map("workspace_id")
+  scope       String   // "calendar", "task", "note", "reminder"
+  name        String
+  color       String   @default("#6366f1")
+  icon        String   @default("Tag")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@map("categories")
+}

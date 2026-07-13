@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "tasks" ALTER COLUMN "position" SET DATA TYPE DOUBLE PRECISION;
