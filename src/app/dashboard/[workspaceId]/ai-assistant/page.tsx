@@ -18,12 +18,13 @@ export default async function AiAssistantPage({
     prisma.calendarEvent.count({ where: { workspaceId, isDraft: false } }),
   ]);
 
-  const initialMessages = result.success ? result.data : [];
+  const conversationData = result.success ? result.data : { activeId: "", messages: [] };
 
   return (
     <ChatView
       workspaceId={workspaceId}
-      initialMessages={initialMessages}
+      initialMessages={conversationData.messages}
+      initialActiveId={conversationData.activeId}
       boardCount={boardCount}
       noteCount={noteCount}
       calendarCount={calendarCount}

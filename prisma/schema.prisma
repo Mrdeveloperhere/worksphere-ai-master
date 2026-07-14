@@ -68,6 +68,7 @@ model Workspace {
   name      String
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
+  plan      String   @default("free")
 
   members        WorkspaceMember[]
   boards         Board[]
@@ -184,6 +185,12 @@ model Settings {
   sidebarCollapsed Boolean @default(false) @map("sidebar_collapsed")
   timezone         String  @default("UTC")
 
+  openaiApiKey      String? @map("openai_api_key")
+  anthropicApiKey   String? @map("anthropic_api_key")
+  geminiApiKey      String? @map("gemini_api_key")
+  assemblyaiApiKey  String? @map("assemblyai_api_key")
+  aiModel           String  @default("gpt-4o") @map("ai_model")
+
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("settings")
@@ -237,7 +244,7 @@ model Conversation {
   user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   messages  ChatMessage[]
 
-  @@unique([workspaceId, userId])
+  @@index([workspaceId, userId])
   @@map("conversations")
 }
 
@@ -347,6 +354,7 @@ model Category {
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
+  @@unique([workspaceId, scope, name])
   @@index([workspaceId])
   @@map("categories")
 }

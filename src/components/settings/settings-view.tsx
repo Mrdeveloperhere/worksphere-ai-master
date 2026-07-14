@@ -1,7 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useTransition } from "react";
+import { useTheme } from "next-themes";
+import { updateTheme, updateApiKeys, updateAiModel, type Theme } from "@/lib/settings/actions";
 import { toast } from "sonner";
+import { useRouter } from "next/navigation";
 import {
   User,
   Key,
@@ -42,6 +45,7 @@ import {
   updateCategory,
   deleteCategory,
 } from "@/lib/categories/actions";
+import { updateWorkspacePlan } from "@/lib/workspace/actions";
 import { cn } from "@/lib/utils";
 
 // Lucide mapping helper for dynamic category icons
@@ -82,6 +86,17 @@ type SettingsViewProps = {
     image: string;
   };
   initialCategories: DbCategory[];
+  currentPlan: string;
+  initialSettings?: {
+    theme?: string;
+    sidebarCollapsed?: boolean;
+    timezone?: string;
+    openaiApiKey?: string | null;
+    anthropicApiKey?: string | null;
+    geminiApiKey?: string | null;
+    assemblyaiApiKey?: string | null;
+    aiModel?: string;
+  } | null;
   limits: {
     boards: number;
     tasks: number;
@@ -95,8 +110,12 @@ export function SettingsView({
   workspaceId,
   user,
   initialCategories,
+  currentPlan,
+  initialSettings,
   limits,
 }: SettingsViewProps) {
+  const router = useRouter();
+  const [isPendingPlan, startTransitionPlan] = useTransition();
   const [activeTab, setActiveTab] = useState<
     "profile" | "subscription" | "categories" | "ai" | "preferences" | "privacy"
   >("profile");
@@ -137,9 +156,40 @@ export function SettingsView({
 
   // AI & preferences mock state
   const [aiAutoPunctuate, setAiAutoPunctuate] = useState(true);
-  const [aiModel, setAiModel] = useState("claude-3-5-sonnet");
-  const [themeMode, setThemeMode] = useState("light");
+  const [aiModel, setAiModel] = useState(initialSettings?.aiModel || "gpt-4o");
+  
+  const { theme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+  const themeMode = mounted ? (theme || "system") : "light";
+
   const [privacyMode, setPrivacyMode] = useState(false);
+
+  // User-provided API Keys
+  const [openaiApiKey, setOpenaiApiKey] = useState(initialSettings?.openaiApiKey || "");
+  const [anthropicApiKey, setAnthropicApiKey] = useState(initialSettings?.anthropicApiKey || "");
+  const [geminiApiKey, setGeminiApiKey] = useState(initialSettings?.geminiApiKey || "");
+  const [assemblyaiApiKey, setAssemblyaiApiKey] = useState(initialSettings?.assemblyaiApiKey || "");
+  const [isSavingKeys, setIsSavingKeys] = useState(false);
+
+  async function handleSaveKeys() {
+    setIsSavingKeys(true);
+    const result = await updateApiKeys({
+      openaiApiKey: openaiApiKey.trim(),
+      anthropicApiKey: anthropicApiKey.trim(),
+      geminiApiKey: geminiApiKey.trim(),
+      assemblyaiApiKey: assemblyaiApiKey.trim(),
+    });
+    setIsSavingKeys(false);
+    if (result.success) {
+      router.refresh();
+      toast.success("API keys updated successfully!");
+    } else {
+      toast.error(result.error || "Failed to update API keys");
+    }
+  }
 
   // Category addition or update
   async function handleAddCategory(e: React.FormEvent) {
@@ -152,7 +202,6 @@ export function SettingsView({
     if (editingId) {
       const result = await updateCategory(editingId, workspaceId, {
         name: newCatName.trim(),
-        scope: newCatScope,
         color: newCatColor,
         icon: newCatIcon,
       });
@@ -332,8 +381,13 @@ export function SettingsView({
 
                 <div className="space-y-4">
                   <div className="flex items-center gap-2">
-                    <span className="text-[10px] font-bold text-[#E55737] bg-[#E55737]/10 px-2.5 py-0.5 rounded-full uppercase tracking-wider">
-                      Free
+                    <span className={cn(
+                      "text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider",
+                      currentPlan === "pro"
+                        ? "text-amber-800 bg-amber-100 dark:bg-amber-900/30 dark:text-amber-300"
+                        : "text-[#E55737] bg-[#E55737]/10"
+                    )}>
+                      {currentPlan === "pro" ? "Pro Plan" : "Free Plan"}
                     </span>
                     <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 dark:bg-emerald-500/10 px-2.5 py-0.5 rounded-full uppercase tracking-wider">
                       active
@@ -342,7 +396,7 @@ export function SettingsView({
 
                   <div className="space-y-0.5">
                     <h2 className="text-xl font-extrabold text-neutral-800 dark:text-neutral-100">
-                      Free workspace
+                      {currentPlan === "pro" ? "Pro Workspace" : "Free Workspace"}
                     </h2>
                     <p className="text-[11px] font-medium text-neutral-400 dark:text-neutral-500">
                       Next billing activity: 5/18/2026
@@ -350,15 +404,46 @@ export function SettingsView({
                   </div>
 
                   <div className="flex gap-2.5 pt-2 flex-wrap">
-                    <button
-                      onClick={() => toast.info("Upgrade dialog window is simulated.")}
-                      className="bg-[#E55737] hover:bg-[#D44626] text-white font-semibold text-xs px-4 py-2 rounded-xl cursor-pointer shadow-xs border-0"
-                    >
-                      Upgrade Plan
-                    </button>
+                    {currentPlan === "pro" ? (
+                      <button
+                        disabled={isPendingPlan}
+                        onClick={() => {
+                          startTransitionPlan(async () => {
+                            const res = await updateWorkspacePlan(workspaceId, "free");
+                            if (res.success) {
+                              toast.success("Downgraded to Free Plan. Limits are now active!");
+                              router.refresh();
+                            } else {
+                              toast.error(res.error);
+                            }
+                          });
+                        }}
+                        className="bg-neutral-600 hover:bg-neutral-700 text-white font-semibold text-xs px-4 py-2 rounded-xl cursor-pointer shadow-xs border-0 disabled:opacity-50 h-9"
+                      >
+                        {isPendingPlan ? "Processing..." : "Downgrade to Free Plan"}
+                      </button>
+                    ) : (
+                      <button
+                        disabled={isPendingPlan}
+                        onClick={() => {
+                          startTransitionPlan(async () => {
+                            const res = await updateWorkspacePlan(workspaceId, "pro");
+                            if (res.success) {
+                              toast.success("Upgraded to Pro Plan! Unlimited creation unlocked!");
+                              router.refresh();
+                            } else {
+                              toast.error(res.error);
+                            }
+                          });
+                        }}
+                        className="bg-[#E55737] hover:bg-[#D44626] text-white font-semibold text-xs px-4 py-2 rounded-xl cursor-pointer shadow-xs border-0 disabled:opacity-50 h-9 animate-pulse"
+                      >
+                        {isPendingPlan ? "Processing..." : "Upgrade to Pro"}
+                      </button>
+                    )}
                     <button
                       onClick={() => toast.info("Subscription management settings loading...")}
-                      className="bg-white hover:bg-neutral-50 border border-neutral-200 dark:bg-neutral-900 dark:hover:bg-neutral-800 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300 font-semibold text-xs px-4 py-2 rounded-xl cursor-pointer shadow-3xs"
+                      className="bg-white hover:bg-neutral-50 border border-neutral-200 dark:bg-neutral-900 dark:hover:bg-neutral-800 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300 font-semibold text-xs px-4 py-2 rounded-xl cursor-pointer shadow-3xs h-9"
                     >
                       Manage subscription
                     </button>
@@ -369,7 +454,7 @@ export function SettingsView({
               {/* Right Plan limits progress bars */}
               <div className="rounded-2xl border border-neutral-200/60 bg-white dark:border-neutral-800/80 dark:bg-[#121214]/60 p-6 shadow-3xs space-y-4">
                 <h3 className="text-xs font-bold uppercase tracking-widest text-[#E11D48] dark:text-[#F43F5E] mb-2">
-                  Free plan limits
+                  {currentPlan === "pro" ? "Workspace Usage (Pro Unlimited)" : "Free plan limits"}
                 </h3>
 
                 <div className="space-y-3.5">
@@ -377,15 +462,17 @@ export function SettingsView({
                   <div className="space-y-1">
                     <div className="flex items-center justify-between text-[11px] font-bold text-neutral-500">
                       <span>Boards</span>
-                      <span className="text-neutral-800 dark:text-neutral-200">{limits.boards} / 3</span>
+                      <span className="text-neutral-800 dark:text-neutral-200">
+                        {limits.boards} {currentPlan === "pro" ? "(unlimited)" : "/ 3"}
+                      </span>
                     </div>
                     <div className="overflow-hidden h-1.5 text-xs flex rounded bg-neutral-100 dark:bg-neutral-800">
                       <div
                         className={cn(
                           "shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center transition-all duration-300",
-                          limits.boards >= 3 ? "bg-[#E55737]" : "bg-neutral-400"
+                          currentPlan === "pro" ? "bg-emerald-500" : limits.boards >= 3 ? "bg-[#E55737]" : "bg-neutral-400"
                         )}
-                        style={{ width: `${Math.min((limits.boards / 3) * 100, 100)}%` }}
+                        style={{ width: `${currentPlan === "pro" ? Math.min((limits.boards / 10) * 100, 100) : Math.min((limits.boards / 3) * 100, 100)}%` }}
                       />
                     </div>
                   </div>
@@ -394,12 +481,17 @@ export function SettingsView({
                   <div className="space-y-1">
                     <div className="flex items-center justify-between text-[11px] font-bold text-neutral-500">
                       <span>Tasks</span>
-                      <span className="text-neutral-800 dark:text-neutral-200">{limits.tasks} / 25</span>
+                      <span className="text-neutral-800 dark:text-neutral-200">
+                        {limits.tasks} {currentPlan === "pro" ? "(unlimited)" : "/ 25"}
+                      </span>
                     </div>
                     <div className="overflow-hidden h-1.5 text-xs flex rounded bg-neutral-100 dark:bg-neutral-800">
                       <div
-                        className="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center transition-all duration-300 bg-neutral-400"
-                        style={{ width: `${Math.min((limits.tasks / 25) * 100, 100)}%` }}
+                        className={cn(
+                          "shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center transition-all duration-300",
+                          currentPlan === "pro" ? "bg-emerald-500" : limits.tasks >= 25 ? "bg-[#E55737]" : "bg-neutral-400"
+                        )}
+                        style={{ width: `${currentPlan === "pro" ? Math.min((limits.tasks / 100) * 100, 100) : Math.min((limits.tasks / 25) * 100, 100)}%` }}
                       />
                     </div>
                   </div>
@@ -408,12 +500,17 @@ export function SettingsView({
                   <div className="space-y-1">
                     <div className="flex items-center justify-between text-[11px] font-bold text-neutral-500">
                       <span>Notes</span>
-                      <span className="text-neutral-800 dark:text-neutral-200">{limits.notes} / 10</span>
+                      <span className="text-neutral-800 dark:text-neutral-200">
+                        {limits.notes} {currentPlan === "pro" ? "(unlimited)" : "/ 10"}
+                      </span>
                     </div>
                     <div className="overflow-hidden h-1.5 text-xs flex rounded bg-neutral-100 dark:bg-neutral-800">
                       <div
-                        className="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center transition-all duration-300 bg-neutral-400"
-                        style={{ width: `${Math.min((limits.notes / 10) * 100, 100)}%` }}
+                        className={cn(
+                          "shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center transition-all duration-300",
+                          currentPlan === "pro" ? "bg-emerald-500" : limits.notes >= 10 ? "bg-[#E55737]" : "bg-neutral-400"
+                        )}
+                        style={{ width: `${currentPlan === "pro" ? Math.min((limits.notes / 50) * 100, 100) : Math.min((limits.notes / 10) * 100, 100)}%` }}
                       />
                     </div>
                   </div>
@@ -422,15 +519,17 @@ export function SettingsView({
                   <div className="space-y-1">
                     <div className="flex items-center justify-between text-[11px] font-bold text-neutral-500">
                       <span>Spaces</span>
-                      <span className="text-neutral-800 dark:text-neutral-200">{limits.spaces} / 2</span>
+                      <span className="text-neutral-800 dark:text-neutral-200">
+                        {limits.spaces} {currentPlan === "pro" ? "(unlimited)" : "/ 2"}
+                      </span>
                     </div>
                     <div className="overflow-hidden h-1.5 text-xs flex rounded bg-neutral-100 dark:bg-neutral-800">
                       <div
                         className={cn(
                           "shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center transition-all duration-300",
-                          limits.spaces >= 2 ? "bg-[#E55737]" : "bg-neutral-400"
+                          currentPlan === "pro" ? "bg-emerald-500" : limits.spaces >= 2 ? "bg-[#E55737]" : "bg-neutral-400"
                         )}
-                        style={{ width: `${Math.min((limits.spaces / 2) * 100, 100)}%` }}
+                        style={{ width: `${currentPlan === "pro" ? Math.min((limits.spaces / 10) * 100, 100) : Math.min((limits.spaces / 2) * 100, 100)}%` }}
                       />
                     </div>
                   </div>
@@ -439,15 +538,17 @@ export function SettingsView({
                   <div className="space-y-1">
                     <div className="flex items-center justify-between text-[11px] font-bold text-neutral-500">
                       <span>Whiteboards</span>
-                      <span className="text-neutral-800 dark:text-neutral-200">{limits.whiteboards} / 2</span>
+                      <span className="text-neutral-800 dark:text-neutral-200">
+                        {limits.whiteboards} {currentPlan === "pro" ? "(unlimited)" : "/ 2"}
+                      </span>
                     </div>
                     <div className="overflow-hidden h-1.5 text-xs flex rounded bg-neutral-100 dark:bg-neutral-800">
                       <div
                         className={cn(
                           "shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center transition-all duration-300",
-                          limits.whiteboards >= 2 ? "bg-[#E55737]" : "bg-neutral-400"
+                          currentPlan === "pro" ? "bg-emerald-500" : limits.whiteboards >= 2 ? "bg-[#E55737]" : "bg-neutral-400"
                         )}
-                        style={{ width: `${Math.min((limits.whiteboards / 2) * 100, 100)}%` }}
+                        style={{ width: `${currentPlan === "pro" ? Math.min((limits.whiteboards / 10) * 100, 100) : Math.min((limits.whiteboards / 2) * 100, 100)}%` }}
                       />
                     </div>
                   </div>
@@ -476,7 +577,7 @@ export function SettingsView({
             <div className="space-y-6">
               
               {/* Creator block */}
-              <div className="rounded-2xl border border-neutral-200/60 bg-white dark:border-neutral-800/80 dark:bg-[#121214]/60 p-6 shadow-3xs space-y-5">
+              <div id="category-form-section" className="rounded-2xl border border-neutral-200/60 bg-white dark:border-neutral-800/80 dark:bg-[#121214]/60 p-6 shadow-3xs space-y-5">
                 <div className="flex items-center gap-1.5 pb-2 border-b border-neutral-100 dark:border-neutral-800/40">
                   <Tag className="size-4.5 text-[#E11D48]" />
                   <h3 className="text-xs font-bold uppercase tracking-widest text-neutral-800 dark:text-neutral-200">
@@ -607,50 +708,36 @@ export function SettingsView({
                           >
                             {renderIcon(cat.icon, "size-4")}
                           </div>
-                          
-                          {editingId === cat.id ? (
-                            <div className="flex items-center gap-1.5">
-                              <Input
-                                value={editingName}
-                                onChange={(e) => setEditingName(e.target.value)}
-                                className="h-6.5 text-[11px] rounded-lg w-28 px-2 border-neutral-300 dark:border-neutral-700"
-                              />
-                              <button onClick={() => handleUpdateCategory(cat.id)} className="text-emerald-600 hover:text-emerald-700 size-6 bg-white border border-neutral-200 rounded-lg flex items-center justify-center cursor-pointer dark:bg-neutral-800 dark:border-neutral-700">
-                                <Check className="size-3.5" />
-                              </button>
-                              <button onClick={() => setEditingId(null)} className="text-red-500 hover:text-red-600 size-6 bg-white border border-neutral-200 rounded-lg flex items-center justify-center cursor-pointer dark:bg-neutral-800 dark:border-neutral-700">
-                                <X className="size-3.5" />
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="space-y-0.5">
-                              <span className="text-[11px] font-bold text-neutral-700 dark:text-neutral-300">
-                                {cat.name}
-                              </span>
-                              <p className="text-[9px] font-mono text-neutral-400">{cat.color}</p>
-                            </div>
-                          )}
+                          <div className="space-y-0.5">
+                            <span className="text-[11px] font-bold text-neutral-700 dark:text-neutral-300">
+                              {cat.name}
+                            </span>
+                            <p className="text-[9px] font-mono text-neutral-400">{cat.color}</p>
+                          </div>
                         </div>
 
-                        {editingId !== cat.id && (
-                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button
-                              onClick={() => {
-                                setEditingId(cat.id);
-                                setEditingName(cat.name);
-                              }}
-                              className="size-6 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 bg-white border border-neutral-200 dark:bg-neutral-800 dark:border-neutral-700 rounded-lg flex items-center justify-center cursor-pointer"
-                            >
-                              <Edit2 className="size-3" />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteCategory(cat.id)}
-                              className="size-6 text-neutral-400 hover:text-red-600 bg-white border border-neutral-200 dark:bg-neutral-800 dark:border-neutral-700 rounded-lg flex items-center justify-center cursor-pointer"
-                            >
-                              <Trash2 className="size-3" />
-                            </button>
-                          </div>
-                        )}
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={() => {
+                              setEditingId(cat.id);
+                              setNewCatName(cat.name);
+                              setNewCatScope(cat.scope);
+                              setNewCatColor(cat.color);
+                              setNewCatIcon(cat.icon);
+                              document.getElementById("category-form-section")?.scrollIntoView({ behavior: "smooth" });
+                              toast.info(`Editing category "${cat.name}". Change settings above.`);
+                            }}
+                            className="size-6 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 bg-white border border-neutral-200 dark:bg-neutral-800 dark:border-neutral-700 rounded-lg flex items-center justify-center cursor-pointer"
+                          >
+                            <Edit2 className="size-3" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteCategory(cat.id)}
+                            className="size-6 text-neutral-400 hover:text-red-600 bg-white border border-neutral-200 dark:bg-neutral-800 dark:border-neutral-700 rounded-lg flex items-center justify-center cursor-pointer"
+                          >
+                            <Trash2 className="size-3" />
+                          </button>
+                        </div>
                       </div>
                     ))}
                     {calendarCats.length === 0 && (
@@ -683,50 +770,36 @@ export function SettingsView({
                           >
                             {renderIcon(cat.icon, "size-4")}
                           </div>
-
-                          {editingId === cat.id ? (
-                            <div className="flex items-center gap-1.5">
-                              <Input
-                                value={editingName}
-                                onChange={(e) => setEditingName(e.target.value)}
-                                className="h-6.5 text-[11px] rounded-lg w-28 px-2 border-neutral-300 dark:border-neutral-700"
-                              />
-                              <button onClick={() => handleUpdateCategory(cat.id)} className="text-emerald-600 hover:text-emerald-700 size-6 bg-white border border-neutral-200 rounded-lg flex items-center justify-center cursor-pointer dark:bg-neutral-800 dark:border-neutral-700">
-                                <Check className="size-3.5" />
-                              </button>
-                              <button onClick={() => setEditingId(null)} className="text-red-500 hover:text-red-600 size-6 bg-white border border-neutral-200 rounded-lg flex items-center justify-center cursor-pointer dark:bg-neutral-800 dark:border-neutral-700">
-                                <X className="size-3.5" />
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="space-y-0.5">
-                              <span className="text-[11px] font-bold text-neutral-700 dark:text-neutral-300">
-                                {cat.name}
-                              </span>
-                              <p className="text-[9px] font-mono text-neutral-400">{cat.color}</p>
-                            </div>
-                          )}
+                          <div className="space-y-0.5">
+                            <span className="text-[11px] font-bold text-neutral-700 dark:text-neutral-300">
+                              {cat.name}
+                            </span>
+                            <p className="text-[9px] font-mono text-neutral-400">{cat.color}</p>
+                          </div>
                         </div>
 
-                        {editingId !== cat.id && (
-                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button
-                              onClick={() => {
-                                setEditingId(cat.id);
-                                setEditingName(cat.name);
-                              }}
-                              className="size-6 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 bg-white border border-neutral-200 dark:bg-neutral-800 dark:border-neutral-700 rounded-lg flex items-center justify-center cursor-pointer"
-                            >
-                              <Edit2 className="size-3" />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteCategory(cat.id)}
-                              className="size-6 text-neutral-400 hover:text-red-600 bg-white border border-neutral-200 dark:bg-neutral-800 dark:border-neutral-700 rounded-lg flex items-center justify-center cursor-pointer"
-                            >
-                              <Trash2 className="size-3" />
-                            </button>
-                          </div>
-                        )}
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={() => {
+                              setEditingId(cat.id);
+                              setNewCatName(cat.name);
+                              setNewCatScope(cat.scope);
+                              setNewCatColor(cat.color);
+                              setNewCatIcon(cat.icon);
+                              document.getElementById("category-form-section")?.scrollIntoView({ behavior: "smooth" });
+                              toast.info(`Editing category "${cat.name}". Change settings above.`);
+                            }}
+                            className="size-6 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 bg-white border border-neutral-200 dark:bg-neutral-800 dark:border-neutral-700 rounded-lg flex items-center justify-center cursor-pointer"
+                          >
+                            <Edit2 className="size-3" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteCategory(cat.id)}
+                            className="size-6 text-neutral-400 hover:text-red-600 bg-white border border-neutral-200 dark:bg-neutral-800 dark:border-neutral-700 rounded-lg flex items-center justify-center cursor-pointer"
+                          >
+                            <Trash2 className="size-3" />
+                          </button>
+                        </div>
                       </div>
                     ))}
                     {taskCats.length === 0 && (
@@ -759,50 +832,36 @@ export function SettingsView({
                           >
                             {renderIcon(cat.icon, "size-4")}
                           </div>
-
-                          {editingId === cat.id ? (
-                            <div className="flex items-center gap-1.5">
-                              <Input
-                                value={editingName}
-                                onChange={(e) => setEditingName(e.target.value)}
-                                className="h-6.5 text-[11px] rounded-lg w-28 px-2 border-neutral-300 dark:border-neutral-700"
-                              />
-                              <button onClick={() => handleUpdateCategory(cat.id)} className="text-emerald-600 hover:text-emerald-700 size-6 bg-white border border-neutral-200 rounded-lg flex items-center justify-center cursor-pointer dark:bg-neutral-800 dark:border-neutral-700">
-                                <Check className="size-3.5" />
-                              </button>
-                              <button onClick={() => setEditingId(null)} className="text-red-500 hover:text-red-600 size-6 bg-white border border-neutral-200 rounded-lg flex items-center justify-center cursor-pointer dark:bg-neutral-800 dark:border-neutral-700">
-                                <X className="size-3.5" />
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="space-y-0.5">
-                              <span className="text-[11px] font-bold text-neutral-700 dark:text-neutral-300">
-                                {cat.name}
-                              </span>
-                              <p className="text-[9px] font-mono text-neutral-400">{cat.color}</p>
-                            </div>
-                          )}
+                          <div className="space-y-0.5">
+                            <span className="text-[11px] font-bold text-neutral-700 dark:text-neutral-300">
+                              {cat.name}
+                            </span>
+                            <p className="text-[9px] font-mono text-neutral-400">{cat.color}</p>
+                          </div>
                         </div>
 
-                        {editingId !== cat.id && (
-                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button
-                              onClick={() => {
-                                setEditingId(cat.id);
-                                setEditingName(cat.name);
-                              }}
-                              className="size-6 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 bg-white border border-neutral-200 dark:bg-neutral-800 dark:border-neutral-700 rounded-lg flex items-center justify-center cursor-pointer"
-                            >
-                              <Edit2 className="size-3" />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteCategory(cat.id)}
-                              className="size-6 text-neutral-400 hover:text-red-600 bg-white border border-neutral-200 dark:bg-neutral-800 dark:border-neutral-700 rounded-lg flex items-center justify-center cursor-pointer"
-                            >
-                              <Trash2 className="size-3" />
-                            </button>
-                          </div>
-                        )}
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={() => {
+                              setEditingId(cat.id);
+                              setNewCatName(cat.name);
+                              setNewCatScope(cat.scope);
+                              setNewCatColor(cat.color);
+                              setNewCatIcon(cat.icon);
+                              document.getElementById("category-form-section")?.scrollIntoView({ behavior: "smooth" });
+                              toast.info(`Editing category "${cat.name}". Change settings above.`);
+                            }}
+                            className="size-6 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 bg-white border border-neutral-200 dark:bg-neutral-800 dark:border-neutral-700 rounded-lg flex items-center justify-center cursor-pointer"
+                          >
+                            <Edit2 className="size-3" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteCategory(cat.id)}
+                            className="size-6 text-neutral-400 hover:text-red-600 bg-white border border-neutral-200 dark:bg-neutral-800 dark:border-neutral-700 rounded-lg flex items-center justify-center cursor-pointer"
+                          >
+                            <Trash2 className="size-3" />
+                          </button>
+                        </div>
                       </div>
                     ))}
                     {noteCats.length === 0 && (
@@ -835,50 +894,36 @@ export function SettingsView({
                           >
                             {renderIcon(cat.icon, "size-4")}
                           </div>
-
-                          {editingId === cat.id ? (
-                            <div className="flex items-center gap-1.5">
-                              <Input
-                                value={editingName}
-                                onChange={(e) => setEditingName(e.target.value)}
-                                className="h-6.5 text-[11px] rounded-lg w-28 px-2 border-neutral-300 dark:border-neutral-700"
-                              />
-                              <button onClick={() => handleUpdateCategory(cat.id)} className="text-emerald-600 hover:text-emerald-700 size-6 bg-white border border-neutral-200 rounded-lg flex items-center justify-center cursor-pointer dark:bg-neutral-800 dark:border-neutral-700">
-                                <Check className="size-3.5" />
-                              </button>
-                              <button onClick={() => setEditingId(null)} className="text-red-500 hover:text-red-600 size-6 bg-white border border-neutral-200 rounded-lg flex items-center justify-center cursor-pointer dark:bg-neutral-800 dark:border-neutral-700">
-                                <X className="size-3.5" />
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="space-y-0.5">
-                              <span className="text-[11px] font-bold text-neutral-700 dark:text-neutral-300">
-                                {cat.name}
-                              </span>
-                              <p className="text-[9px] font-mono text-neutral-400">{cat.color}</p>
-                            </div>
-                          )}
+                          <div className="space-y-0.5">
+                            <span className="text-[11px] font-bold text-neutral-700 dark:text-neutral-300">
+                              {cat.name}
+                            </span>
+                            <p className="text-[9px] font-mono text-neutral-400">{cat.color}</p>
+                          </div>
                         </div>
 
-                        {editingId !== cat.id && (
-                          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button
-                              onClick={() => {
-                                setEditingId(cat.id);
-                                setEditingName(cat.name);
-                              }}
-                              className="size-6 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 bg-white border border-neutral-200 dark:bg-neutral-800 dark:border-neutral-700 rounded-lg flex items-center justify-center cursor-pointer"
-                            >
-                              <Edit2 className="size-3" />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteCategory(cat.id)}
-                              className="size-6 text-neutral-400 hover:text-red-600 bg-white border border-neutral-200 dark:bg-neutral-800 dark:border-neutral-700 rounded-lg flex items-center justify-center cursor-pointer"
-                            >
-                              <Trash2 className="size-3" />
-                            </button>
-                          </div>
-                        )}
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={() => {
+                              setEditingId(cat.id);
+                              setNewCatName(cat.name);
+                              setNewCatScope(cat.scope);
+                              setNewCatColor(cat.color);
+                              setNewCatIcon(cat.icon);
+                              document.getElementById("category-form-section")?.scrollIntoView({ behavior: "smooth" });
+                              toast.info(`Editing category "${cat.name}". Change settings above.`);
+                            }}
+                            className="size-6 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 bg-white border border-neutral-200 dark:bg-neutral-800 dark:border-neutral-700 rounded-lg flex items-center justify-center cursor-pointer"
+                          >
+                            <Edit2 className="size-3" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteCategory(cat.id)}
+                            className="size-6 text-neutral-400 hover:text-red-600 bg-white border border-neutral-200 dark:bg-neutral-800 dark:border-neutral-700 rounded-lg flex items-center justify-center cursor-pointer"
+                          >
+                            <Trash2 className="size-3" />
+                          </button>
+                        </div>
                       </div>
                     ))}
                     {reminderCats.length === 0 && (
@@ -937,16 +982,100 @@ export function SettingsView({
                   </label>
                   <select
                     value={aiModel}
-                    onChange={(e) => {
-                      setAiModel(e.target.value);
-                      toast.success("Default workspace LLM model updated.");
+                    onChange={async (e) => {
+                      const val = e.target.value;
+                      setAiModel(val);
+                      const res = await updateAiModel(val);
+                      if (res.success) {
+                        router.refresh();
+                        toast.success(`Default workspace LLM model updated to: ${val}`);
+                      } else {
+                        toast.error(res.error || "Failed to update LLM model preference");
+                      }
                     }}
                     className="w-full text-xs font-semibold px-3.5 h-8.5 rounded-xl border border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900 text-neutral-800 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-[#E55737]"
                   >
                     <option value="gpt-4o">GPT-4o (Default)</option>
                     <option value="claude-3-5-sonnet">Claude 3.5 Sonnet (Optimized)</option>
+                    <option value="gemini-2.0-flash">Gemini 2.0 Flash (Recommended - Fast & Free limits)</option>
                     <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
                   </select>
+                </div>
+
+                {/* Custom API Keys Form */}
+                <div className="pt-5 border-t border-neutral-200/50 dark:border-neutral-800/40 space-y-4">
+                  <div className="space-y-0.5">
+                    <h4 className="text-xs font-bold text-neutral-800 dark:text-neutral-200">
+                      User-Provided API Keys
+                    </h4>
+                    <p className="text-[10px] text-neutral-400 dark:text-neutral-500">
+                      Keys are securely stored in your personal preferences and override default system keys.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-400">
+                        AssemblyAI API Key (Speech-to-Text)
+                      </label>
+                      <Input
+                        type="password"
+                        value={assemblyaiApiKey}
+                        onChange={(e) => setAssemblyaiApiKey(e.target.value)}
+                        placeholder="Enter AssemblyAI Key"
+                        className="rounded-xl border-neutral-200 dark:border-neutral-800 text-xs focus-visible:ring-[#E55737]"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-400">
+                        OpenAI API Key (Chat & Templates)
+                      </label>
+                      <Input
+                        type="password"
+                        value={openaiApiKey}
+                        onChange={(e) => setOpenaiApiKey(e.target.value)}
+                        placeholder="Enter OpenAI Key"
+                        className="rounded-xl border-neutral-200 dark:border-neutral-800 text-xs focus-visible:ring-[#E55737]"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-400">
+                        Anthropic API Key (Claude)
+                      </label>
+                      <Input
+                        type="password"
+                        value={anthropicApiKey}
+                        onChange={(e) => setAnthropicApiKey(e.target.value)}
+                        placeholder="Enter Anthropic Key"
+                        className="rounded-xl border-neutral-200 dark:border-neutral-800 text-xs focus-visible:ring-[#E55737]"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-400">
+                        Gemini API Key (Google AI)
+                      </label>
+                      <Input
+                        type="password"
+                        value={geminiApiKey}
+                        onChange={(e) => setGeminiApiKey(e.target.value)}
+                        placeholder="Enter Gemini Key"
+                        className="rounded-xl border-neutral-200 dark:border-neutral-800 text-xs focus-visible:ring-[#E55737]"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end pt-2">
+                    <Button
+                      onClick={handleSaveKeys}
+                      disabled={isSavingKeys}
+                      className="bg-[#E55737] hover:bg-[#D44626] text-white font-semibold text-xs px-4 h-9 rounded-xl cursor-pointer"
+                    >
+                      {isSavingKeys ? "Saving..." : "Save API Keys"}
+                    </Button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -972,8 +1101,11 @@ export function SettingsView({
                       <button
                         key={mode}
                         onClick={() => {
-                          setThemeMode(mode);
-                          toast.success(`Theme mode updated to: ${mode}`);
+                          if (setTheme) {
+                            setTheme(mode);
+                            void updateTheme(mode as Theme);
+                            toast.success(`Theme mode updated to: ${mode}`);
+                          }
                         }}
                         className={cn(
                           "py-2 rounded-xl text-xs font-bold border capitalize cursor-pointer transition-all",

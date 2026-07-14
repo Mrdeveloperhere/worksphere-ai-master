@@ -19,9 +19,16 @@ export async function createWhiteboard(
   const access = await tryWorkspaceAccess(workspaceId);
   if (!access.ok) return fail(access.error);
 
-  const whiteboardCount = await prisma.whiteboard.count({ where: { workspaceId } });
-  if (whiteboardCount >= 2) {
-    return fail("You have reached the limit of 2 whiteboards allowed on the Free plan. Please upgrade to create more whiteboards.");
+  const workspace = await prisma.workspace.findUnique({
+    where: { id: workspaceId },
+    select: { plan: true },
+  });
+
+  if (workspace?.plan !== "pro") {
+    const whiteboardCount = await prisma.whiteboard.count({ where: { workspaceId } });
+    if (whiteboardCount >= 2) {
+      return fail("You have reached the limit of 2 whiteboards allowed on the Free plan. Please upgrade to create more whiteboards.");
+    }
   }
 
   const board = await prisma.whiteboard.create({

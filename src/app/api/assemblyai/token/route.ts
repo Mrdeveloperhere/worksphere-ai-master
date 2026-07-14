@@ -1,7 +1,25 @@
+import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
 
 export async function GET() {
-  const apiKey = process.env.ASSEMBLYAI_API_KEY;
+  const { userId } = await auth();
+  let apiKey = process.env.ASSEMBLYAI_API_KEY;
+
+  if (userId) {
+    try {
+      const settings = await prisma.settings.findUnique({
+        where: { userId },
+        select: { assemblyaiApiKey: true },
+      });
+      if (settings?.assemblyaiApiKey) {
+        apiKey = settings.assemblyaiApiKey;
+      }
+    } catch (e) {
+      console.error("Failed to fetch assemblyaiApiKey from database settings:", e);
+    }
+  }
+
   if (!apiKey) {
     return NextResponse.json(
       { error: "AssemblyAI API key not configured on server" },

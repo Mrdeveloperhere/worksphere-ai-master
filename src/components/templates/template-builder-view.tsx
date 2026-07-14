@@ -2,19 +2,70 @@
 
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
-import { Sparkles, Flame, Trash2, Mic, Eye, Plus, CheckSquare, PlusCircle } from "lucide-react";
+import {
+  Sparkles,
+  Flame,
+  Trash2,
+  Mic,
+  Eye,
+  Plus,
+  CheckSquare,
+  PlusCircle,
+  Sliders,
+  Check,
+  X,
+  Activity,
+  Target,
+  Heart,
+  Zap,
+  BookOpen,
+  Calendar,
+  Clock,
+} from "lucide-react";
 
 import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { useSidebarAppsStore, type SidebarApp } from "@/lib/stores/sidebar-apps-store";
+import { cn } from "@/lib/utils";
+
+const iconMap: Record<string, React.ComponentType<any>> = {
+  Flame,
+  Sparkles,
+  Activity,
+  Target,
+  Heart,
+  Zap,
+  BookOpen,
+  Calendar,
+  Clock,
+};
+
+function renderAppIcon(iconName?: string, className = "size-5.5", style?: React.CSSProperties) {
+  const Icon = iconMap[iconName || "Flame"] || Flame;
+  return <Icon className={className} style={style} />;
+}
+
+const COLORS_LIST = ["#E55737", "#10B981", "#F59E0B", "#8B5CF6", "#3B82F6", "#EC4899"];
+const ICONS_LIST = [
+  "Flame",
+  "Sparkles",
+  "Activity",
+  "Target",
+  "Heart",
+  "Zap",
+  "BookOpen",
+  "Calendar",
+  "Clock",
+];
 
 type GeneratedApp = {
   id: string;
   name: string;
   description: string;
   color: string;
+  icon?: string;
   metricLabel: string;
   items: { text: string; done: boolean }[];
   createdAt: string;
@@ -26,6 +77,7 @@ const DEFAULT_APPS: GeneratedApp[] = [
     name: "HabitFlow",
     description: "Daily habit tracking and consistency monitor.",
     color: "#E55737",
+    icon: "Flame",
     metricLabel: "Daily Goal Completion",
     items: [
       { text: "Morning Meditation", done: true },
@@ -36,11 +88,24 @@ const DEFAULT_APPS: GeneratedApp[] = [
   },
 ];
 
-export function TemplateBuilderView({ workspaceId }: { workspaceId: string }) {
+export function TemplateBuilderView({
+  workspaceId,
+  initialPlan,
+}: {
+  workspaceId: string;
+  initialPlan: string;
+}) {
   // Plan states
-  const [isPro, setIsPro] = useState(false);
+  const [isPro, setIsPro] = useState(initialPlan === "pro");
   const [prompt, setPrompt] = useState("");
   const [generating, setGenerating] = useState(false);
+
+  // Customize App settings state
+  const [isCustomizing, setIsCustomizing] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editDesc, setEditDesc] = useState("");
+  const [editColor, setEditColor] = useState("");
+  const [editIcon, setEditIcon] = useState("");
 
   // Apps list (stored locally & synced to state)
   const [savedApps, setSavedApps] = useState<GeneratedApp[]>(() => {
@@ -67,6 +132,15 @@ export function TemplateBuilderView({ workspaceId }: { workspaceId: string }) {
 
   // Sync selectedAppId if the app is deleted
   const selectedApp = savedApps.find((a) => a.id === selectedAppId) ?? savedApps[0] ?? null;
+
+  useEffect(() => {
+    if (selectedApp) {
+      setEditName(selectedApp.name);
+      setEditDesc(selectedApp.description);
+      setEditColor(selectedApp.color);
+      setEditIcon(selectedApp.icon || "Flame");
+    }
+  }, [selectedApp, isCustomizing]);
 
   function handleGenerate() {
     if (!prompt.trim()) return;
@@ -124,6 +198,7 @@ export function TemplateBuilderView({ workspaceId }: { workspaceId: string }) {
         name,
         description,
         color,
+        icon: "Flame",
         metricLabel,
         items: initialItems,
         createdAt: new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
@@ -184,10 +259,39 @@ export function TemplateBuilderView({ workspaceId }: { workspaceId: string }) {
         id: app.id,
         name: app.name,
         color: app.color,
-        icon: "Flame",
+        icon: app.icon || "Flame",
       });
       toast.success(`${app.name} was added to the sidebar.`);
     }
+  }
+
+  // Handle saving customization details
+  function handleSaveCustomization() {
+    if (!selectedApp || !editName.trim()) return;
+
+    const updatedApp = {
+      ...selectedApp,
+      name: editName.trim(),
+      description: editDesc.trim(),
+      color: editColor,
+      icon: editIcon,
+    };
+
+    setSavedApps(savedApps.map((a) => (a.id === selectedApp.id ? updatedApp : a)));
+    
+    // Update sidebar store if pinned
+    const isPinned = pinnedSidebarApps.some((a) => a.id === selectedApp.id);
+    if (isPinned) {
+      addApp({
+        id: selectedApp.id,
+        name: editName.trim(),
+        color: editColor,
+        icon: editIcon,
+      });
+    }
+
+    setIsCustomizing(false);
+    toast.success("App settings updated successfully!");
   }
 
   // Calculate dynamic completion %
@@ -318,7 +422,7 @@ export function TemplateBuilderView({ workspaceId }: { workspaceId: string }) {
                         className="size-8 rounded-lg flex items-center justify-center shrink-0 shadow-3xs"
                         style={{ backgroundColor: `${app.color}15` }}
                       >
-                        <Flame className="size-5.5" style={{ color: app.color }} />
+                        {renderAppIcon(app.icon, "size-4.5", { color: app.color })}
                       </div>
                       <div className="space-y-0.5 min-w-0">
                         <div className="flex items-center gap-2">
@@ -388,121 +492,246 @@ export function TemplateBuilderView({ workspaceId }: { workspaceId: string }) {
         {selectedApp ? (
           <div className="rounded-3xl border border-neutral-200/60 bg-white p-6 shadow-xs dark:border-neutral-800/80 dark:bg-[#121214]/60 space-y-6">
             
-            {/* Header */}
-            <div className="flex items-center justify-between border-b border-neutral-200/60 dark:border-neutral-800/60 pb-4">
-              <div className="flex items-center gap-3">
-                <div
-                  className="size-10 rounded-xl flex items-center justify-center shadow-3xs border border-white"
-                  style={{ backgroundColor: `${selectedApp.color}15` }}
-                >
-                  <Flame className="size-5.5" style={{ color: selectedApp.color }} />
-                </div>
-                <div className="space-y-0.5">
-                  <span className="text-[9px] font-bold text-red-500 uppercase tracking-widest leading-none">
-                    FUNCTIONAL GENERATED APP
-                  </span>
-                  <h2 className="text-lg font-bold text-neutral-800 dark:text-neutral-100 leading-none">
-                    {selectedApp.name}
-                  </h2>
-                  <p className="text-xs text-neutral-400 dark:text-neutral-500">
-                    {selectedApp.description}
-                  </p>
-                </div>
-              </div>
-
-              <button
-                onClick={() => toast.info("View History feature is coming soon!")}
-                className="bg-white hover:bg-neutral-50 border border-neutral-200/70 text-neutral-600 font-semibold text-[10px] px-3.5 py-1.5 rounded-lg transition-all shadow-3xs cursor-pointer dark:bg-neutral-900 dark:hover:bg-neutral-800 dark:border-neutral-700 dark:text-neutral-300"
-              >
-                View History
-              </button>
-            </div>
-
-            {/* Today's Momentum Widget */}
-            <div className="p-5 rounded-2xl bg-neutral-50/50 dark:bg-neutral-900/30 border border-neutral-200/40 dark:border-neutral-800/40 space-y-3">
-              <div className="flex items-center justify-between text-xs font-bold text-neutral-700 dark:text-neutral-300">
-                <span>{selectedApp.metricLabel}</span>
-                <span className="text-neutral-800 dark:text-neutral-100 font-extrabold">{completionPercentage}%</span>
-              </div>
-              
-              {/* Custom styled progress slider */}
-              <div className="relative pt-1">
-                <div className="overflow-hidden h-2 text-xs flex rounded bg-neutral-200 dark:bg-neutral-800">
-                  <div
-                    className="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center transition-all duration-300 animate-transition-all"
-                    style={{ width: `${completionPercentage}%`, backgroundColor: selectedApp.color }}
-                  />
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={completionPercentage}
-                  readOnly
-                  className="w-full absolute top-0.5 opacity-0 cursor-default"
-                />
-              </div>
-            </div>
-
-            {/* Active Habits list component */}
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-xs font-bold text-neutral-400 dark:text-neutral-500 uppercase tracking-widest">
-                  Active Tasks / Habits
-                </h3>
-              </div>
-
-              {/* Add items form */}
-              <form onSubmit={handleAddChecklistItem} className="flex gap-2">
-                <Input
-                  value={newChecklistItem}
-                  onChange={(e) => setNewChecklistItem(e.target.value)}
-                  placeholder="Add checklist item"
-                  className="rounded-xl border-neutral-200 dark:border-neutral-800 dark:bg-neutral-900/40 text-xs h-8.5 focus-visible:ring-[#E55737]"
-                />
-                <button
-                  type="submit"
-                  disabled={!newChecklistItem.trim()}
-                  className="bg-[#E55737] hover:bg-[#D44626] text-white font-semibold text-xs px-3.5 rounded-xl border-0 cursor-pointer shadow-xs shrink-0 flex items-center justify-center h-8.5"
-                >
-                  + Add
-                </button>
-              </form>
-
-              {/* Checkboxes items list */}
-              <div className="space-y-1.5">
-                {selectedApp.items.map((item, idx) => (
-                  <div
-                    key={idx}
-                    onClick={() => handleToggleItem(idx)}
-                    className="flex items-center gap-3 p-3 bg-white dark:bg-[#121214]/60 border border-neutral-200/50 dark:border-neutral-800/80 rounded-xl hover:bg-neutral-50/50 dark:hover:bg-neutral-800/30 transition-all cursor-pointer"
-                  >
-                    <div 
-                      className={`size-4.5 rounded-md border flex items-center justify-center transition-all shrink-0 ${
-                        item.done 
-                          ? "bg-[#E55737] border-[#E55737] text-white" 
-                          : "border-neutral-300 dark:border-neutral-700"
-                      }`}
-                    >
-                      {item.done && (
-                        <svg className="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                        </svg>
-                      )}
-                    </div>
-                    <span className={`text-xs font-semibold ${item.done ? "line-through text-neutral-400 dark:text-neutral-500" : "text-neutral-700 dark:text-neutral-300"}`}>
-                      {item.text}
+            {isCustomizing ? (
+              <div className="space-y-6">
+                <div className="flex items-center justify-between border-b border-neutral-200/60 dark:border-neutral-800/60 pb-4">
+                  <div className="space-y-0.5">
+                    <span className="text-[9px] font-bold text-[#E55737] uppercase tracking-widest leading-none">
+                      CUSTOMIZE APP
                     </span>
+                    <h2 className="text-lg font-bold text-neutral-800 dark:text-neutral-100 leading-none">
+                      Edit App Settings
+                    </h2>
                   </div>
-                ))}
+                  <button
+                    onClick={() => setIsCustomizing(false)}
+                    className="bg-white hover:bg-neutral-50 border border-neutral-200 text-neutral-600 size-8 rounded-lg flex items-center justify-center cursor-pointer dark:bg-neutral-900 dark:border-neutral-800 dark:text-neutral-400"
+                  >
+                    <X className="size-4" />
+                  </button>
+                </div>
 
-                {selectedApp.items.length === 0 && (
-                  <p className="text-[11px] text-neutral-400 py-3 text-center">
-                    Checklist is empty. Add a new item to get started!
-                  </p>
-                )}
+                <div className="space-y-4">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-400">
+                      App Name
+                    </label>
+                    <Input
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      placeholder="App Name"
+                      className="rounded-xl border-neutral-200 dark:border-neutral-800 text-xs focus-visible:ring-[#E55737]"
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-400">
+                      Description
+                    </label>
+                    <Input
+                      value={editDesc}
+                      onChange={(e) => setEditDesc(e.target.value)}
+                      placeholder="Description"
+                      className="rounded-xl border-neutral-200 dark:border-neutral-800 text-xs focus-visible:ring-[#E55737]"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+                    {/* Color selector */}
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-400">
+                        App Theme Color
+                      </label>
+                      <div className="flex gap-2 items-center flex-wrap">
+                        {COLORS_LIST.map((c) => (
+                          <button
+                            key={c}
+                            type="button"
+                            onClick={() => setEditColor(c)}
+                            className={cn(
+                              "size-6 rounded-full cursor-pointer transition-all border-2 flex items-center justify-center",
+                              editColor === c ? "border-neutral-800 dark:border-neutral-100 scale-110" : "border-transparent"
+                            )}
+                            style={{ backgroundColor: c }}
+                          >
+                            {editColor === c && <Check className="size-3.5 text-white" />}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Icon selector */}
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-bold uppercase tracking-widest text-neutral-400">
+                        Sidebar Icon
+                      </label>
+                      <div className="grid grid-cols-5 gap-1.5 max-w-[200px]">
+                        {ICONS_LIST.map((ic) => {
+                          const IconComp = iconMap[ic];
+                          return (
+                            <button
+                              key={ic}
+                              type="button"
+                              onClick={() => setEditIcon(ic)}
+                              title={ic}
+                              className={cn(
+                                "size-8 rounded-lg border flex items-center justify-center cursor-pointer transition-all hover:bg-neutral-100 dark:hover:bg-neutral-800",
+                                editIcon === ic
+                                  ? "bg-[#FFE4E6] border-[#E11D48] text-[#E11D48] dark:bg-[#E11D48]/10"
+                                  : "border-neutral-200/50 bg-transparent text-neutral-400 dark:border-neutral-800"
+                              )}
+                            >
+                              <IconComp className="size-4" />
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex gap-2.5 pt-4 border-t border-neutral-100 dark:border-neutral-800/60">
+                  <button
+                    onClick={handleSaveCustomization}
+                    className="bg-[#E55737] hover:bg-[#D44626] text-white font-semibold text-xs px-4 py-2 rounded-xl cursor-pointer shadow-xs border-0 h-9"
+                  >
+                    Save Changes
+                  </button>
+                  <button
+                    onClick={() => setIsCustomizing(false)}
+                    className="bg-white hover:bg-neutral-50 border border-neutral-200 dark:bg-neutral-900 dark:hover:bg-neutral-800 dark:border-neutral-700 text-neutral-600 dark:text-neutral-300 font-semibold text-xs px-4 py-2 rounded-xl cursor-pointer shadow-3xs h-9"
+                  >
+                    Cancel
+                  </button>
+                </div>
               </div>
-            </div>
+            ) : (
+              <>
+                {/* Header */}
+                <div className="flex items-center justify-between border-b border-neutral-200/60 dark:border-neutral-800/60 pb-4">
+                  <div className="flex items-center gap-3">
+                    <div
+                      className="size-10 rounded-xl flex items-center justify-center shadow-3xs border border-white"
+                      style={{ backgroundColor: `${selectedApp.color}15` }}
+                    >
+                      {renderAppIcon(selectedApp.icon, "size-5.5", { color: selectedApp.color })}
+                    </div>
+                    <div className="space-y-0.5">
+                      <span className="text-[9px] font-bold text-red-500 uppercase tracking-widest leading-none">
+                        FUNCTIONAL GENERATED APP
+                      </span>
+                      <h2 className="text-lg font-bold text-neutral-800 dark:text-neutral-100 leading-none">
+                        {selectedApp.name}
+                      </h2>
+                      <p className="text-xs text-neutral-400 dark:text-neutral-500">
+                        {selectedApp.description}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setIsCustomizing(true)}
+                      className="bg-white hover:bg-neutral-50 border border-neutral-200/70 text-neutral-600 font-semibold text-[10px] px-3.5 py-1.5 rounded-lg transition-all shadow-3xs cursor-pointer dark:bg-neutral-900 dark:hover:bg-neutral-800 dark:border-neutral-700 dark:text-neutral-300 flex items-center gap-1.5 h-8"
+                    >
+                      <Sliders className="size-3" /> Customize
+                    </button>
+                    <button
+                      onClick={() => toast.info("View History feature is coming soon!")}
+                      className="bg-white hover:bg-neutral-50 border border-neutral-200/70 text-neutral-600 font-semibold text-[10px] px-3.5 py-1.5 rounded-lg transition-all shadow-3xs cursor-pointer dark:bg-neutral-900 dark:hover:bg-neutral-800 dark:border-neutral-700 dark:text-neutral-300 h-8"
+                    >
+                      View History
+                    </button>
+                  </div>
+                </div>
+
+                {/* Today's Momentum Widget */}
+                <div className="p-5 rounded-2xl bg-neutral-50/50 dark:bg-neutral-900/30 border border-neutral-200/40 dark:border-neutral-800/40 space-y-3">
+                  <div className="flex items-center justify-between text-xs font-bold text-neutral-700 dark:text-neutral-300">
+                    <span>{selectedApp.metricLabel}</span>
+                    <span className="text-neutral-800 dark:text-neutral-100 font-extrabold">{completionPercentage}%</span>
+                  </div>
+                  
+                  {/* Custom styled progress slider */}
+                  <div className="relative pt-1">
+                    <div className="overflow-hidden h-2 text-xs flex rounded bg-neutral-200 dark:bg-neutral-800">
+                      <div
+                        className="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center transition-all duration-300 animate-transition-all"
+                        style={{ width: `${completionPercentage}%`, backgroundColor: selectedApp.color }}
+                      />
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={completionPercentage}
+                      readOnly
+                      className="w-full absolute top-0.5 opacity-0 cursor-default"
+                    />
+                  </div>
+                </div>
+
+                {/* Active Habits list component */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-bold text-neutral-400 dark:text-neutral-500 uppercase tracking-widest">
+                      Active Tasks / Habits
+                    </h3>
+                  </div>
+
+                  {/* Add items form */}
+                  <form onSubmit={handleAddChecklistItem} className="flex gap-2">
+                    <Input
+                      value={newChecklistItem}
+                      onChange={(e) => setNewChecklistItem(e.target.value)}
+                      placeholder="Add checklist item"
+                      className="rounded-xl border-neutral-200 dark:border-neutral-800 dark:bg-neutral-900/40 text-xs h-8.5 focus-visible:ring-[#E55737]"
+                    />
+                    <button
+                      type="submit"
+                      disabled={!newChecklistItem.trim()}
+                      className="bg-[#E55737] hover:bg-[#D44626] text-white font-semibold text-xs px-3.5 rounded-xl border-0 cursor-pointer shadow-xs shrink-0 flex items-center justify-center h-8.5"
+                    >
+                      + Add
+                    </button>
+                  </form>
+
+                  {/* Checkboxes items list */}
+                  <div className="space-y-1.5">
+                    {selectedApp.items.map((item, idx) => (
+                      <div
+                        key={idx}
+                        onClick={() => handleToggleItem(idx)}
+                        className="flex items-center gap-3 p-3 bg-white dark:bg-[#121214]/60 border border-neutral-200/50 dark:border-neutral-800/80 rounded-xl hover:bg-neutral-50/50 dark:hover:bg-neutral-800/30 transition-all cursor-pointer"
+                      >
+                        <div 
+                          className={`size-4.5 rounded-md border flex items-center justify-center transition-all shrink-0 ${
+                            item.done 
+                              ? "bg-[#E55737] border-[#E55737] text-white" 
+                              : "border-neutral-300 dark:border-neutral-700"
+                          }`}
+                        >
+                          {item.done && (
+                            <svg className="size-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                        </div>
+                        <span className={`text-xs font-semibold ${item.done ? "line-through text-neutral-400 dark:text-neutral-500" : "text-neutral-700 dark:text-neutral-300"}`}>
+                          {item.text}
+                        </span>
+                      </div>
+                    ))}
+
+                    {selectedApp.items.length === 0 && (
+                      <p className="text-[11px] text-neutral-400 py-3 text-center">
+                        Checklist is empty. Add a new item to get started!
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
 
           </div>
         ) : (

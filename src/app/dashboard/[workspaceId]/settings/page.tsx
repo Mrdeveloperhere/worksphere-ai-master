@@ -20,7 +20,9 @@ export default async function SettingsPage({
   }
 
   // Fetch current database counts for limit meters
-  const [boardsCount, tasksCount, notesCount, spacesCount, whiteboardsCount] = await Promise.all([
+  const [workspace, settings, boardsCount, tasksCount, notesCount, spacesCount, whiteboardsCount] = await Promise.all([
+    prisma.workspace.findUnique({ where: { id: workspaceId }, select: { plan: true } }),
+    prisma.settings.findUnique({ where: { userId: clerkUser.id } }),
     prisma.board.count({ where: { workspaceId } }),
     prisma.task.count({ where: { column: { board: { workspaceId } } } }),
     prisma.note.count({ where: { workspaceId, isTrashed: false } }),
@@ -45,6 +47,8 @@ export default async function SettingsPage({
         image: userImage,
       }}
       initialCategories={categories}
+      currentPlan={workspace?.plan || "free"}
+      initialSettings={settings}
       limits={{
         boards: boardsCount,
         tasks: tasksCount,

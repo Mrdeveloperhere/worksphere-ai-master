@@ -12,13 +12,22 @@ import {
 import { toast } from "sonner";
 import { Trash2 } from "lucide-react";
 
+import { cn } from "@/lib/utils";
 import { Column } from "@/components/kanban/column";
 import { TaskDetailDialog } from "@/components/kanban/task-detail-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useKanbanStore, type KanbanColumn } from "@/lib/stores/kanban-store";
-import { createColumn, moveTask, reorderColumns } from "@/lib/kanban/actions";
+import {
+  createColumn,
+  moveTask,
+  reorderColumns,
+  renameBoard,
+  recolorBoard,
+  deleteBoard,
+  getBoardDeletionImpact,
+} from "@/lib/kanban/actions";
 import { inviteMember, removeMember } from "@/lib/workspace/actions";
 
 type BoardInfo = { id: string; name: string; color: string; workspaceId: string };
@@ -60,6 +69,77 @@ export function KanbanBoard({
   const [membersList, setMembersList] = useState(initialMembers);
   const [inviteEmail, setInviteEmail] = useState("");
   const [isPending, startTransition] = useTransition();
+
+  // Board Settings state
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [boardName, setBoardName] = useState(board.name);
+  const [boardColor, setBoardColor] = useState(board.color);
+  const [impactColumnCount, setImpactColumnCount] = useState(0);
+  const [impactTaskCount, setImpactTaskCount] = useState(0);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // Sync state if board changes
+  useEffect(() => {
+    setBoardName(board.name);
+    setBoardColor(board.color);
+  }, [board]);
+
+  async function handleOpenSettings() {
+    setSettingsOpen(true);
+    const res = await getBoardDeletionImpact(board.id);
+    if (res.success) {
+      setImpactColumnCount(res.data.columnCount);
+      setImpactTaskCount(res.data.taskCount);
+    }
+  }
+
+  async function handleSaveSettings() {
+    setIsSavingSettings(true);
+    
+    // Rename board if changed
+    if (boardName.trim() !== board.name) {
+      const res = await renameBoard(board.id, boardName.trim());
+      if (!res.success) {
+        toast.error(res.error || "Failed to rename board");
+        setIsSavingSettings(false);
+        return;
+      }
+    }
+
+    // Recolor board if changed
+    if (boardColor !== board.color) {
+      const res = await recolorBoard(board.id, boardColor);
+      if (!res.success) {
+        toast.error(res.error || "Failed to change board color");
+        setIsSavingSettings(false);
+        return;
+      }
+    }
+
+    setIsSavingSettings(false);
+    setSettingsOpen(false);
+    toast.success("Board settings updated successfully!");
+    router.refresh();
+  }
+
+  async function handleDeleteBoard() {
+    const confirmDelete = window.confirm(
+      `Are you sure you want to permanently delete the board "${board.name}"? This action cannot be undone and will delete all tasks and columns.`
+    );
+    if (!confirmDelete) return;
+
+    setIsDeleting(true);
+    const res = await deleteBoard(board.id);
+    setIsDeleting(false);
+
+    if (res.success) {
+      toast.success("Board deleted successfully!");
+      router.push(`/dashboard/${board.workspaceId}`);
+    } else {
+      toast.error(res.error || "Failed to delete board");
+    }
+  }
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -249,7 +329,10 @@ export function KanbanBoard({
               Collaboration
             </button>
             
-            <button className="p-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-600 rounded-xl transition-all border-0 shadow-2xs cursor-pointer dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700 flex items-center justify-center h-9">
+            <button
+              onClick={handleOpenSettings}
+              className="p-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-600 rounded-xl transition-all border-0 shadow-2xs cursor-pointer dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700 flex items-center justify-center h-9"
+            >
               <svg className="size-4 text-neutral-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -390,6 +473,104 @@ export function KanbanBoard({
                   </div>
                 ))}
               </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Board Settings Dialog */}
+      <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <DialogContent className="max-w-md rounded-3xl bg-white dark:bg-[#121214] border border-neutral-200 dark:border-neutral-800 p-6">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-bold text-neutral-800 dark:text-neutral-100 flex items-center gap-2">
+              <svg className="size-5 text-[#E55737]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+              Board Settings
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-5 pt-3">
+            {/* Rename Board */}
+            <div className="space-y-1.5">
+              <Label htmlFor="boardName" className="text-xs font-bold uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
+                Board Name
+              </Label>
+              <Input
+                id="boardName"
+                value={boardName}
+                onChange={(e) => setBoardName(e.target.value)}
+                placeholder="Enter board name..."
+                className="h-10 rounded-xl border-neutral-200 dark:border-neutral-800 dark:bg-neutral-900 focus-visible:ring-[#E55737]"
+              />
+            </div>
+
+            {/* Board Color Theme */}
+            <div className="space-y-2">
+              <Label className="text-xs font-bold uppercase tracking-wider text-neutral-400 dark:text-neutral-500">
+                Board Theme Color
+              </Label>
+              <div className="flex items-center gap-3">
+                {[
+                  { value: "#6366f1", name: "Indigo" },
+                  { value: "#3b82f6", name: "Blue" },
+                  { value: "#10b981", name: "Emerald" },
+                  { value: "#8b5cf6", name: "Purple" },
+                  { value: "#f43f5e", name: "Rose" },
+                  { value: "#e55737", name: "Coral (Brand)" }
+                ].map((c) => (
+                  <button
+                    key={c.value}
+                    onClick={() => setBoardColor(c.value)}
+                    className={cn(
+                      "size-8 rounded-full border-2 transition-all cursor-pointer",
+                      boardColor === c.value
+                        ? "border-[#E55737] scale-110 shadow-sm"
+                        : "border-transparent hover:scale-105"
+                    )}
+                    style={{ backgroundColor: c.value }}
+                    title={c.name}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Delete Board Section */}
+            {isOwner && (
+              <div className="pt-4 border-t border-neutral-100 dark:border-neutral-800/80 space-y-3">
+                <div className="space-y-1">
+                  <h4 className="text-xs font-bold text-red-500 uppercase tracking-wider">Danger Zone</h4>
+                  <p className="text-[11px] text-neutral-500 leading-relaxed">
+                    Permanently delete this board along with its <strong className="text-neutral-800 dark:text-neutral-200">{impactColumnCount} columns</strong> and <strong className="text-neutral-800 dark:text-neutral-200">{impactTaskCount} tasks</strong>. This cannot be undone.
+                  </p>
+                </div>
+                <button
+                  onClick={handleDeleteBoard}
+                  disabled={isDeleting}
+                  className="bg-red-50 hover:bg-red-100 dark:bg-red-950/20 dark:hover:bg-red-950/30 text-red-600 dark:text-red-400 text-xs font-bold px-4 py-2 rounded-xl border-0 transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <Trash2 className="size-3.5" />
+                  Delete Board
+                </button>
+              </div>
+            )}
+
+            {/* Save / Cancel buttons */}
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                onClick={() => setSettingsOpen(false)}
+                className="bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-300 font-semibold text-xs px-4 py-2 rounded-xl border-0 transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveSettings}
+                disabled={isSavingSettings || !boardName.trim()}
+                className="bg-[#E55737] hover:bg-[#D44626] text-white font-bold text-xs px-4 py-2 rounded-xl border-0 transition-all cursor-pointer shadow-xs disabled:opacity-50"
+              >
+                {isSavingSettings ? "Saving..." : "Save Changes"}
+              </button>
             </div>
           </div>
         </DialogContent>

@@ -20,28 +20,35 @@ export function MessageBubble({
   const isUser = message.role === "USER";
 
   return (
-    <div className={cn("flex", isUser ? "justify-end" : "justify-start")}>
+    <div className={cn("flex w-full mb-1", isUser ? "justify-end" : "justify-start")}>
       <div
         className={cn(
-          "max-w-[80%] rounded-lg px-3 py-2 text-sm",
-          isUser ? "bg-primary text-primary-foreground" : "bg-muted",
+          "max-w-[75%] rounded-2xl px-4 py-2.5 text-sm shadow-sm leading-relaxed whitespace-pre-wrap transition-all",
+          isUser
+            ? "bg-[#E55737] text-white rounded-br-none"
+            : "bg-white dark:bg-[#1A1A1D]/80 text-neutral-800 dark:text-neutral-200 border border-neutral-200/50 dark:border-neutral-800/85 rounded-bl-none"
         )}
       >
-        <p className="whitespace-pre-wrap">{message.content}</p>
+        <p className="whitespace-pre-wrap leading-relaxed">{message.content}</p>
 
         {message.pendingAction && (
-          <div className="mt-2 flex gap-2">
-            <Button size="sm" disabled={resolving} onClick={onConfirm} className="h-7 gap-1">
-              <Check className="size-3.5" /> Confirm
+          <div className="mt-3 flex gap-2 pt-2.5 border-t border-neutral-100 dark:border-neutral-800/80">
+            <Button
+              size="sm"
+              disabled={resolving}
+              onClick={onConfirm}
+              className="h-7 text-xs bg-[#E55737] hover:bg-[#D44626] text-white rounded-lg flex items-center gap-1 cursor-pointer border-0 shadow-2xs"
+            >
+              <Check className="size-3" /> Confirm
             </Button>
             <Button
               size="sm"
               variant="outline"
               disabled={resolving}
               onClick={onCancel}
-              className="h-7 gap-1"
+              className="h-7 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-800/60 rounded-lg flex items-center gap-1 cursor-pointer"
             >
-              <X className="size-3.5" /> Cancel
+              <X className="size-3" /> Cancel
             </Button>
           </div>
         )}

@@ -85,9 +85,16 @@ export async function createSpace(
   const access = await tryWorkspaceAccess(workspaceId);
   if (!access.ok) return fail(access.error);
 
-  const spaceCount = await prisma.space.count({ where: { workspaceId } });
-  if (spaceCount >= 2) {
-    return fail("You have reached the limit of 2 spaces allowed on the Free plan. Please upgrade to create more spaces.");
+  const workspace = await prisma.workspace.findUnique({
+    where: { id: workspaceId },
+    select: { plan: true },
+  });
+
+  if (workspace?.plan !== "pro") {
+    const spaceCount = await prisma.space.count({ where: { workspaceId } });
+    if (spaceCount >= 2) {
+      return fail("You have reached the limit of 2 spaces allowed on the Free plan. Please upgrade to create more spaces.");
+    }
   }
 
   const space = await prisma.space.create({

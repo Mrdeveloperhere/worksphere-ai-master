@@ -38,7 +38,11 @@ export async function listCategories(workspaceId: string) {
         icon: c.icon,
       }));
 
-      await prisma.category.createMany({ data });
+      try {
+        await prisma.category.createMany({ data });
+      } catch (err) {
+        // Ignore unique constraint or concurrent write errors
+      }
       categories = await prisma.category.findMany({
         where: { workspaceId },
         orderBy: { createdAt: "asc" },

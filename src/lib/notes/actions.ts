@@ -11,9 +11,16 @@ export async function createNote(workspaceId: string): Promise<ActionResult<Note
   const access = await tryWorkspaceAccess(workspaceId);
   if (!access.ok) return fail(access.error);
 
-  const noteCount = await prisma.note.count({ where: { workspaceId, isTrashed: false } });
-  if (noteCount >= 10) {
-    return fail("You have reached the limit of 10 notes allowed on the Free plan. Please upgrade to create more notes.");
+  const workspace = await prisma.workspace.findUnique({
+    where: { id: workspaceId },
+    select: { plan: true },
+  });
+
+  if (workspace?.plan !== "pro") {
+    const noteCount = await prisma.note.count({ where: { workspaceId, isTrashed: false } });
+    if (noteCount >= 10) {
+      return fail("You have reached the limit of 10 notes allowed on the Free plan. Please upgrade to create more notes.");
+    }
   }
 
   const note = await prisma.note.create({

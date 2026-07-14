@@ -176,3 +176,19 @@ export async function removeMember(
   revalidatePath("/dashboard");
   return ok(undefined);
 }
+
+export async function updateWorkspacePlan(
+  workspaceId: string,
+  plan: string,
+): Promise<ActionResult<void>> {
+  const access = await tryWorkspaceAccess(workspaceId, { role: "OWNER" });
+  if (!access.ok) return fail(access.error);
+
+  await prisma.workspace.update({
+    where: { id: workspaceId },
+    data: { plan },
+  });
+
+  revalidatePath(`/dashboard/${workspaceId}`);
+  return ok(undefined);
+}

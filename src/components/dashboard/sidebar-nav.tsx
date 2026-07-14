@@ -2,7 +2,30 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Flame, X } from "lucide-react";
+import {
+  Flame,
+  X,
+  Sparkles,
+  Activity,
+  Target,
+  Heart,
+  Zap,
+  BookOpen,
+  Calendar,
+  Clock,
+} from "lucide-react";
+
+const appIcons: Record<string, React.ComponentType<any>> = {
+  Flame,
+  Sparkles,
+  Activity,
+  Target,
+  Heart,
+  Zap,
+  BookOpen,
+  Calendar,
+  Clock,
+};
 
 import { NAV_ITEMS } from "@/components/dashboard/nav-items";
 import { Badge } from "@/components/ui/badge";
@@ -120,7 +143,10 @@ export function SidebarNav({ workspaceId, collapsed, onNavigate }: SidebarNavPro
                       className="size-5 rounded-md flex items-center justify-center shrink-0"
                       style={{ backgroundColor: `${app.color}15` }}
                     >
-                      <Flame className="size-3.5" style={{ color: app.color }} />
+                      {(() => {
+                        const Icon = appIcons[app.icon] || Flame;
+                        return <Icon className="size-3.5" style={{ color: app.color }} />;
+                      })()}
                     </div>
                     {!collapsed && <span className="truncate">{app.name}</span>}
                   </div>

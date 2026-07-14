@@ -85,12 +85,19 @@ export async function generateTemplate(
   const access = await tryWorkspaceAccess(workspaceId);
   if (!access.ok) return fail(access.error);
 
-  const client = getOpenAIClient();
-  if (!client) {
+  let ai;
+  try {
+    ai = await getOpenAIClient(access.userId);
+  } catch (err: any) {
+    return fail(err.message || "Failed to initialize AI Client");
+  }
+
+  if (!ai) {
     return fail(
-      "The Template Builder needs an OpenAI API key — add OPENAI_API_KEY to your .env and restart the dev server.",
+      "The Template Builder needs an API key — configure it in your Settings -> AI Settings.",
     );
   }
+  const { client, model: activeModel } = ai;
 
   const schema = kind === "board" ? BOARD_SCHEMA : PAGE_SCHEMA;
   const schemaName = kind === "board" ? "board_template" : "page_template";
@@ -98,7 +105,7 @@ export async function generateTemplate(
   let raw: string | null;
   try {
     const completion = await client.chat.completions.create({
-      model: OPENAI_MODEL,
+      model: activeModel,
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: prompt.trim() },
@@ -109,8 +116,19 @@ export async function generateTemplate(
       },
     });
     raw = completion.choices[0]?.message.content ?? null;
-  } catch {
-    return fail("The AI request failed — try again in a moment.");
+  } catch (error: any) {
+    console.error("AI template generation failed:", error);
+    let errMsg = "The AI request failed — try again in a moment.";
+    if (error?.status === 429 || error?.message?.includes("quota") || error?.message?.includes("RateLimitError")) {
+      if (activeModel.startsWith("gemini")) {
+        errMsg = "Gemini API quota exceeded. Please configure your own active Gemini API Key in Settings -> AI Settings to proceed.";
+      } else {
+        errMsg = "OpenAI API quota exceeded. Please configure your own active OpenAI API Key in Settings -> AI Settings to proceed.";
+      }
+    } else if (error?.message) {
+      errMsg = `AI generation failed: ${error.message}`;
+    }
+    return fail(errMsg);
   }
 
   if (!raw) return fail("The AI didn't return anything usable — try rephrasing.");

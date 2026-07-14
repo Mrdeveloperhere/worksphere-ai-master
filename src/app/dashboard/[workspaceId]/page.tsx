@@ -89,8 +89,9 @@ export default async function WorkspaceHomePage({
     prisma.note.findMany({ where: { workspaceId }, orderBy: { updatedAt: "desc" } }),
     prisma.page.findMany({ where: { workspaceId }, orderBy: { updatedAt: "desc" } }),
     prisma.whiteboard.findMany({ where: { workspaceId }, orderBy: { updatedAt: "desc" } }),
-    prisma.conversation.findUnique({
-      where: { workspaceId_userId: { workspaceId, userId } },
+    prisma.conversation.findFirst({
+      where: { workspaceId, userId },
+      orderBy: { updatedAt: "desc" },
       include: { _count: { select: { messages: true } } }
     }),
     prisma.task.count({

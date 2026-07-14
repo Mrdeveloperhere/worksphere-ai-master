@@ -25,9 +25,16 @@ export async function createBoard(
   const access = await tryWorkspaceAccess(workspaceId);
   if (!access.ok) return fail(access.error);
 
-  const boardCount = await prisma.board.count({ where: { workspaceId } });
-  if (boardCount >= 3) {
-    return fail("You have reached the limit of 3 boards allowed on the Free plan. Please upgrade to create more boards.");
+  const workspace = await prisma.workspace.findUnique({
+    where: { id: workspaceId },
+    select: { plan: true },
+  });
+
+  if (workspace?.plan !== "pro") {
+    const boardCount = await prisma.board.count({ where: { workspaceId } });
+    if (boardCount >= 3) {
+      return fail("You have reached the limit of 3 boards allowed on the Free plan. Please upgrade to create more boards.");
+    }
   }
 
   const board = await prisma.board.create({
@@ -211,11 +218,18 @@ export async function createTask(
   const access = await tryWorkspaceAccess(workspaceId);
   if (!access.ok) return fail(access.error);
 
-  const taskCount = await prisma.task.count({
-    where: { column: { board: { workspaceId } } },
+  const workspace = await prisma.workspace.findUnique({
+    where: { id: workspaceId },
+    select: { plan: true },
   });
-  if (taskCount >= 25) {
-    return fail("You have reached the limit of 25 tasks allowed on the Free plan. Please upgrade to create more tasks.");
+
+  if (workspace?.plan !== "pro") {
+    const taskCount = await prisma.task.count({
+      where: { column: { board: { workspaceId } } },
+    });
+    if (taskCount >= 25) {
+      return fail("You have reached the limit of 25 tasks allowed on the Free plan. Please upgrade to create more tasks.");
+    }
   }
 
   const maxPosition = await prisma.task.aggregate({
